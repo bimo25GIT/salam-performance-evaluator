@@ -31,6 +31,36 @@ interface SAWCalculatorProps {
   criteriaUpdateTrigger?: number;
 }
 
+// Konstanta untuk urutan kategori
+const CATEGORY_ORDER = [
+  'A. Kinerja Inti',
+  'B. Kedisiplinan', 
+  'C. Faktor Tambahan'
+];
+
+// Konstanta untuk urutan kriteria kanonis dalam setiap kategori
+const CANONICAL_CRITERIA_ORDER = {
+  'A. Kinerja Inti': [
+    'Kualitas Kerja',
+    'Tanggung Jawab', 
+    'Kuantitas Kerja',
+    'Pemahaman Tugas',
+    'Inisiatif',
+    'Kerjasama'
+  ],
+  'B. Kedisiplinan': [
+    'Jumlah Hari Alpa',
+    'Jumlah Keterlambatan',
+    'Jumlah Hari Izin',
+    'Jumlah Hari Sakit',
+    'Pulang Cepat'
+  ],
+  'C. Faktor Tambahan': [
+    'Prestasi',
+    'Surat Peringatan'
+  ]
+};
+
 export const SAWCalculator = ({ employees, onCalculate, criteriaUpdateTrigger }: SAWCalculatorProps) => {
   const [criteriaWeights, setCriteriaWeights] = useState<{ [key: string]: number }>({});
   const [criteriaTypes, setCriteriaTypes] = useState<{ [key: string]: string }>({});
@@ -43,6 +73,42 @@ export const SAWCalculator = ({ employees, onCalculate, criteriaUpdateTrigger }:
   const [hasSavedResults, setHasSavedResults] = useState(false);
   const [lastCalculationDate, setLastCalculationDate] = useState<string>('');
   const { toast } = useToast();
+
+  // Fungsi untuk mengurutkan kriteria berdasarkan kategori dan urutan kanonis
+  const sortCriteria = (criteria: Criteria[]): Criteria[] => {
+    return criteria.sort((a, b) => {
+      // Pertama, urutkan berdasarkan kategori
+      const categoryIndexA = CATEGORY_ORDER.indexOf(a.category);
+      const categoryIndexB = CATEGORY_ORDER.indexOf(b.category);
+      
+      // Jika kategori berbeda, urutkan berdasarkan urutan kategori
+      if (categoryIndexA !== categoryIndexB) {
+        // Kategori yang tidak ada dalam CATEGORY_ORDER akan diletakkan di akhir
+        if (categoryIndexA === -1) return 1;
+        if (categoryIndexB === -1) return -1;
+        return categoryIndexA - categoryIndexB;
+      }
+      
+      // Jika kategori sama, urutkan berdasarkan urutan kriteria kanonis
+      const canonicalOrder = CANONICAL_CRITERIA_ORDER[a.category as keyof typeof CANONICAL_CRITERIA_ORDER];
+      if (canonicalOrder) {
+        const indexA = canonicalOrder.indexOf(a.name);
+        const indexB = canonicalOrder.indexOf(b.name);
+        
+        // Jika kedua kriteria ada dalam urutan kanonis
+        if (indexA !== -1 && indexB !== -1) {
+          return indexA - indexB;
+        }
+        
+        // Jika hanya satu yang ada dalam urutan kanonis
+        if (indexA !== -1) return -1;
+        if (indexB !== -1) return 1;
+      }
+      
+      // Jika tidak ada dalam urutan kanonis, urutkan berdasarkan nama
+      return a.name.localeCompare(b.name);
+    });
+  };
 
   // Fungsi untuk mengkonversi nama kriteria menjadi field name yang konsisten
   const createFieldName = (criteriaName: string): string => {
@@ -365,44 +431,45 @@ export const SAWCalculator = ({ employees, onCalculate, criteriaUpdateTrigger }:
 
       console.log('Raw criteria data from Supabase:', data);
 
+      // Convert to Criteria format and sort
+      const rawCriteria: Criteria[] = data.map(item => ({
+        id: item.id,
+        name: item.name,
+        type: item.type as 'Benefit' | 'Cost',
+        weight: item.weight,
+        category: item.category,
+        scale: item.scale
+      }));
+
+      // Sort criteria using the new sorting function
+      const sortedCriteria = sortCriteria(rawCriteria);
+
       const weights: { [key: string]: number } = {};
       const types: { [key: string]: string } = {};
-      const processedCriteria: Criteria[] = [];
 
-      data.forEach((item, index) => {
-        const criteria: Criteria = {
-          id: item.id,
-          name: item.name,
-          type: item.type as 'Benefit' | 'Cost',
-          weight: item.weight,
-          category: item.category,
-          scale: item.scale
-        };
-
+      sortedCriteria.forEach((criteria, index) => {
         const fieldName = createFieldName(criteria.name);
         weights[fieldName] = criteria.weight / 100;
         types[fieldName] = criteria.type;
         
-        // Generate criteria code mapping
+        // Generate criteria code mapping berdasarkan urutan yang sudah disortir
         criteriaCodeMapping[fieldName] = `C${index + 1}`;
         
-        console.log(`Mapped ${criteria.name} -> ${fieldName} (${criteriaCodeMapping[fieldName]})`);
-
-        processedCriteria.push(criteria);
+        console.log(`Mapped ${criteria.name} -> ${fieldName} (${criteriaCodeMapping[fieldName]}) - Category: ${criteria.category}`);
       });
 
       setCriteriaWeights(weights);
       setCriteriaTypes(types);
-      setCriteriaData(processedCriteria);
+      setCriteriaData(sortedCriteria); // Simpan data yang sudah diurutkan
 
       console.log('Processed criteria weights:', weights);
       console.log('Processed criteria types:', types);
-      console.log('Total criteria loaded:', processedCriteria.length);
-      console.log('Mapped criteria fields:', Object.keys(weights));
+      console.log('Total criteria loaded and sorted:', sortedCriteria.length);
+      console.log('Sorted criteria order:', sortedCriteria.map(c => `${c.category}: ${c.name}`));
 
       toast({
         title: "Berhasil",
-        description: `Data ${processedCriteria.length} kriteria berhasil dimuat dari database. ${Object.keys(weights).length} kriteria berhasil dipetakan.`,
+        description: `Data ${sortedCriteria.length} kriteria berhasil dimuat dan diurutkan berdasarkan kategori dari database.`,
       });
     } catch (error) {
       console.error('Error fetching criteria:', error);
@@ -453,9 +520,10 @@ export const SAWCalculator = ({ employees, onCalculate, criteriaUpdateTrigger }:
     console.log("Using criteria weights (decimals):", criteriaWeights);
 
     try {
+      // Gunakan criteriaData yang sudah diurutkan
       const activeCriteria = criteriaData.filter(criterion => criteriaWeights[createFieldName(criterion.name)] !== undefined);
       
-      console.log("Active criteria for calculation:", activeCriteria.map(c => c.name));
+      console.log("Active criteria for calculation (sorted):", activeCriteria.map(c => `${c.category}: ${c.name}`));
       console.log("Available criteria weights:", Object.keys(criteriaWeights));
 
       if (activeCriteria.length === 0) {
@@ -593,7 +661,7 @@ export const SAWCalculator = ({ employees, onCalculate, criteriaUpdateTrigger }:
 
       toast({
         title: "Berhasil",
-        description: `Perhitungan SAW selesai menggunakan ${activeCriteria.length} kriteria dan disimpan ke database`,
+        description: `Perhitungan SAW selesai menggunakan ${activeCriteria.length} kriteria yang diurutkan berdasarkan kategori dan disimpan ke database`,
       });
     } catch (error) {
       console.error('Error in SAW calculation:', error);
@@ -648,7 +716,7 @@ export const SAWCalculator = ({ employees, onCalculate, criteriaUpdateTrigger }:
             Perhitungan Simple Additive Weighting (SAW)
           </CardTitle>
           <p className="text-gray-600">
-            Proses perhitungan otomatis menggunakan metode SAW untuk evaluasi kinerja karyawan
+            Proses perhitungan otomatis menggunakan metode SAW untuk evaluasi kinerja karyawan dengan kriteria terstruktur berdasarkan kategori
           </p>
         </CardHeader>
         <CardContent>
@@ -754,29 +822,71 @@ export const SAWCalculator = ({ employees, onCalculate, criteriaUpdateTrigger }:
 
             {criteriaData.length > 0 && (
               <div className="mt-4">
-                <h4 className="font-semibold mb-2">Kriteria yang Dimuat dari Database:</h4>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
-                  {criteriaData.map((criteria, index) => {
-                    const fieldName = createFieldName(criteria.name);
-                    const isMapped = criteriaWeights[fieldName] !== undefined;
-                    const criteriaCode = `C${index + 1}`;
+                <h4 className="font-semibold mb-2">Kriteria yang Dimuat dari Database (Terstruktur berdasarkan Kategori):</h4>
+                <div className="space-y-4">
+                  {CATEGORY_ORDER.map(category => {
+                    const categoryCriteria = criteriaData.filter(c => c.category === category);
+                    if (categoryCriteria.length === 0) return null;
+                    
                     return (
-                      <div key={criteria.id} className={`flex justify-between p-2 rounded ${isMapped ? 'bg-green-50' : 'bg-red-50'}`}>
-                        <span><strong>{criteriaCode}:</strong> {criteria.name}</span>
-                        <span className="text-gray-600">
-                          {criteria.type} - Bobot: {criteria.weight}%
-                          {isMapped ? ' ✓' : ' ✗'}
-                        </span>
+                      <div key={category} className="border rounded-lg p-3 bg-gray-50">
+                        <h5 className="font-medium text-gray-800 mb-2">{category}</h5>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+                          {categoryCriteria.map((criteria, index) => {
+                            const fieldName = createFieldName(criteria.name);
+                            const isMapped = criteriaWeights[fieldName] !== undefined;
+                            const globalIndex = criteriaData.indexOf(criteria);
+                            const criteriaCode = `C${globalIndex + 1}`;
+                            return (
+                              <div key={criteria.id} className={`flex justify-between p-2 rounded ${isMapped ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
+                                <span><strong>{criteriaCode}:</strong> {criteria.name}</span>
+                                <span className="text-gray-600">
+                                  {criteria.type} - Bobot: {criteria.weight}%
+                                  {isMapped ? ' ✓' : ' ✗'}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
                       </div>
                     );
                   })}
+                  
+                  {/* Tampilkan kriteria yang tidak ada dalam kategori standar */}
+                  {(() => {
+                    const uncategorizedCriteria = criteriaData.filter(c => !CATEGORY_ORDER.includes(c.category));
+                    if (uncategorizedCriteria.length === 0) return null;
+                    
+                    return (
+                      <div className="border rounded-lg p-3 bg-yellow-50">
+                        <h5 className="font-medium text-gray-800 mb-2">Kriteria Lainnya</h5>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-2 text-sm">
+                          {uncategorizedCriteria.map((criteria) => {
+                            const fieldName = createFieldName(criteria.name);
+                            const isMapped = criteriaWeights[fieldName] !== undefined;
+                            const globalIndex = criteriaData.indexOf(criteria);
+                            const criteriaCode = `C${globalIndex + 1}`;
+                            return (
+                              <div key={criteria.id} className={`flex justify-between p-2 rounded ${isMapped ? 'bg-green-50 border border-green-200' : 'bg-red-50 border border-red-200'}`}>
+                                <span><strong>{criteriaCode}:</strong> {criteria.name} ({criteria.category})</span>
+                                <span className="text-gray-600">
+                                  {criteria.type} - Bobot: {criteria.weight}%
+                                  {isMapped ? ' ✓' : ' ✗'}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
               </div>
             )}
 
             {/* Updated Normalization Rules */}
             <div className="mt-4 p-3 bg-blue-50 rounded-lg text-sm">
-              <h5 className="font-semibold mb-2">Aturan Normalisasi SAW (FLEKSIBEL):</h5>
+              <h5 className="font-semibold mb-2">Aturan Normalisasi SAW (FLEKSIBEL & TERSTRUKTUR):</h5>
               <div className="grid grid-cols-1 gap-2 text-xs">
                 <div>
                   <strong>Benefit Criteria:</strong>
@@ -789,6 +899,11 @@ export const SAWCalculator = ({ employees, onCalculate, criteriaUpdateTrigger }:
                   <strong>Cost Criteria:</strong>
                   <p>• Binary 0/1: Rij = 1.000 jika nilai = 0, Rij = 0.000 jika nilai = 1</p>
                   <p>• Lainnya: Rij = 0.000 jika nilai > 0, Rij = 1.000 jika nilai = 0</p>
+                </div>
+                <div className="mt-2 text-green-700">
+                  <strong>Struktur Kriteria Otomatis:</strong>
+                  <p>• C1-C6: Kinerja Inti (Benefit) | C7-C11: Kedisiplinan (Cost) | C12-C13: Faktor Tambahan (Mixed)</p>
+                  <p>• Kriteria baru akan otomatis diurutkan berdasarkan kategori dan posisi kanonis</p>
                 </div>
               </div>
             </div>
@@ -809,17 +924,20 @@ export const SAWCalculator = ({ employees, onCalculate, criteriaUpdateTrigger }:
         <Card className="bg-white shadow-lg">
           <CardHeader>
             <CardTitle>Decision Matrix</CardTitle>
-            <p className="text-sm text-gray-600">Matriks keputusan awal (nilai asli)</p>
+            <p className="text-sm text-gray-600">Matriks keputusan awal (nilai asli) - Kriteria diurutkan berdasarkan kategori</p>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
               <Table>
-                <TableCaption>Data mentah karyawan</TableCaption>
+                <TableCaption>Data mentah karyawan dengan kriteria terstruktur</TableCaption>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[100px]">Nama</TableHead>
                     {criteriaData.filter(criterion => criteriaWeights[createFieldName(criterion.name)] !== undefined).map((criterion, index) => (
-                      <TableHead key={criterion.id}>C{index + 1}</TableHead>
+                      <TableHead key={criterion.id} className="text-center">
+                        <div className="text-xs">C{index + 1}</div>
+                        <div className="text-xs text-gray-500">{criterion.category.replace(/^[A-C]\.\s/, '')}</div>
+                      </TableHead>
                     ))}
                   </TableRow>
                 </TableHeader>
@@ -828,7 +946,7 @@ export const SAWCalculator = ({ employees, onCalculate, criteriaUpdateTrigger }:
                     <TableRow key={employee.id}>
                       <TableCell className="font-medium">{employee.name}</TableCell>
                       {decisionMatrix[index].map((value, j) => (
-                        <TableCell key={j}>{value}</TableCell>
+                        <TableCell key={j} className="text-center">{value}</TableCell>
                       ))}
                     </TableRow>
                   ))}
@@ -844,18 +962,21 @@ export const SAWCalculator = ({ employees, onCalculate, criteriaUpdateTrigger }:
           <CardHeader>
             <CardTitle>Normalized Matrix</CardTitle>
             <p className="text-sm text-gray-600">
-              Matriks yang sudah dinormalisasi menggunakan metode SAW
+              Matriks yang sudah dinormalisasi menggunakan metode SAW - Kriteria terstruktur berdasarkan kategori
             </p>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
               <Table>
-                <TableCaption>Data Normalisasi</TableCaption>
+                <TableCaption>Data Normalisasi dengan kriteria terstruktur</TableCaption>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[100px]">Nama</TableHead>
                     {criteriaData.filter(criterion => criteriaWeights[createFieldName(criterion.name)] !== undefined).map((criterion, index) => (
-                      <TableHead key={criterion.id}>C{index + 1}</TableHead>
+                      <TableHead key={criterion.id} className="text-center">
+                        <div className="text-xs">C{index + 1}</div>
+                        <div className="text-xs text-gray-500">{criterion.category.replace(/^[A-C]\.\s/, '')}</div>
+                      </TableHead>
                     ))}
                   </TableRow>
                 </TableHeader>
@@ -864,7 +985,7 @@ export const SAWCalculator = ({ employees, onCalculate, criteriaUpdateTrigger }:
                     <TableRow key={employee.id}>
                       <TableCell className="font-medium">{employee.name}</TableCell>
                       {normalizedMatrix[index].map((value, j) => (
-                        <TableCell key={j}>{value.toFixed(3)}</TableCell>
+                        <TableCell key={j} className="text-center">{value.toFixed(3)}</TableCell>
                       ))}
                     </TableRow>
                   ))}
@@ -880,13 +1001,13 @@ export const SAWCalculator = ({ employees, onCalculate, criteriaUpdateTrigger }:
           <CardHeader>
             <CardTitle>Final Scores</CardTitle>
             <p className="text-sm text-gray-600">
-              Hasil akhir perhitungan SAW dan rekomendasi
+              Hasil akhir perhitungan SAW dan rekomendasi dengan kriteria terstruktur
             </p>
           </CardHeader>
           <CardContent>
             <div className="overflow-x-auto">
               <Table>
-                <TableCaption>Hasil Perhitungan SAW</TableCaption>
+                <TableCaption>Hasil Perhitungan SAW dengan kriteria terstruktur berdasarkan kategori</TableCaption>
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-[100px]">Peringkat</TableHead>
