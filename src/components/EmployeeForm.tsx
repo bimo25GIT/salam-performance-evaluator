@@ -19,26 +19,6 @@ interface EmployeeFormProps {
   criteriaUpdateTrigger?: number;
 }
 
-// Urutan kanonis kriteria untuk konsistensi C1-C13
-const CANONICAL_CRITERIA_ORDER = [
-  // C1-C6: Kinerja Inti (Benefit)
-  'Kualitas Kerja',
-  'Tanggung Jawab', 
-  'Kuantitas Kerja',
-  'Pemahaman Tugas',
-  'Inisiatif',
-  'Kerjasama',
-  // C7-C11: Kedisiplinan (Cost)
-  'Jumlah Hari Alpa',
-  'Jumlah Keterlambatan',
-  'Jumlah Hari Izin',
-  'Jumlah Hari Sakit',
-  'Pulang Cepat',
-  // C12-C13: Faktor Tambahan (Mixed)
-  'Prestasi',
-  'Surat Peringatan'
-];
-
 export const EmployeeForm = ({ onAddEmployee, employees, criteriaUpdateTrigger }: EmployeeFormProps) => {
   const [dbEmployees, setDbEmployees] = useState<DBEmployee[]>([]);
   const [evaluationScores, setEvaluationScores] = useState<EvaluationScore[]>([]);
@@ -58,7 +38,8 @@ export const EmployeeForm = ({ onAddEmployee, employees, criteriaUpdateTrigger }
     try {
       const { data: criteriaData, error } = await supabase
         .from('criteria')
-        .select('*');
+        .select('*')
+        .order('category', { ascending: true });
       
       if (error) {
         console.error('Error fetching criteria:', error);
@@ -68,26 +49,13 @@ export const EmployeeForm = ({ onAddEmployee, employees, criteriaUpdateTrigger }
           variant: "destructive",
         });
       } else {
-        // Urutkan kriteria berdasarkan urutan kanonis
-        const sortedCriteria = (criteriaData || []).sort((a, b) => {
-          const indexA = CANONICAL_CRITERIA_ORDER.indexOf(a.name);
-          const indexB = CANONICAL_CRITERIA_ORDER.indexOf(b.name);
-          
-          // Jika kriteria tidak ditemukan dalam urutan kanonis, letakkan di akhir
-          if (indexA === -1 && indexB === -1) return a.name.localeCompare(b.name);
-          if (indexA === -1) return 1;
-          if (indexB === -1) return -1;
-          
-          return indexA - indexB;
-        });
+        setCriteria(criteriaData || []);
+        console.log('EmployeeForm: Criteria loaded:', criteriaData?.length || 0);
         
-        setCriteria(sortedCriteria || []);
-        console.log('EmployeeForm: Criteria loaded in canonical order:', sortedCriteria?.length || 0);
-        
-        // Initialize form data dengan semua kriteria dari database dalam urutan terstruktur
+        // Initialize form data dengan semua kriteria dari database
         const newFormData: { [criteria_id: string]: number } = {};
         
-        sortedCriteria.forEach(criterion => {
+        (criteriaData || []).forEach(criterion => {
           // Set default values berdasarkan tipe dan kategori kriteria
           if (criterion.type === 'Benefit') {
             if (criterion.scale.includes('1-5')) {
@@ -103,7 +71,7 @@ export const EmployeeForm = ({ onAddEmployee, employees, criteriaUpdateTrigger }
         });
         
         setFormData(newFormData);
-        console.log('Form data initialized with all criteria in canonical order:', newFormData);
+        console.log('Form data initialized with all criteria:', newFormData);
         console.log('Total criteria loaded:', Object.keys(newFormData).length);
       }
     } catch (error) {
@@ -290,41 +258,14 @@ export const EmployeeForm = ({ onAddEmployee, employees, criteriaUpdateTrigger }
 
     setLoading(true);
     try {
-      // PERBAIKAN: Ambil skor evaluasi yang sudah ada untuk karyawan ini
-      const { data: existingScores, error: fetchError } = await supabase
-        .from('evaluation_scores')
-        .select('id, criteria_id')
-        .eq('employee_id', selectedEmployeeId);
+      // Prepare evaluation scores data
+      const evaluationScoresData = criteria.map(criterion => ({
+        employee_id: selectedEmployeeId,
+        criteria_id: criterion.id,
+        score: formData[criterion.id] || 0
+      }));
 
-      if (fetchError) {
-        console.error('Error fetching existing scores:', fetchError);
-        throw fetchError;
-      }
-
-      // Buat map dari existing scores untuk referensi cepat
-      const existingScoresMap = new Map<string, string>();
-      (existingScores || []).forEach(score => {
-        existingScoresMap.set(score.criteria_id, score.id);
-      });
-
-      // Prepare evaluation scores data dengan ID yang benar
-      const evaluationScoresData = criteria.map(criterion => {
-        const existingId = existingScoresMap.get(criterion.id);
-        const scoreData: any = {
-          employee_id: selectedEmployeeId,
-          criteria_id: criterion.id,
-          score: formData[criterion.id] || 0
-        };
-
-        // PERBAIKAN: Sertakan ID jika skor sudah ada, biarkan kosong jika baru
-        if (existingId) {
-          scoreData.id = existingId;
-        }
-
-        return scoreData;
-      });
-
-      console.log('Saving evaluation scores with proper IDs:', evaluationScoresData);
+      console.log('Saving evaluation scores:', evaluationScoresData);
 
       // Save to database using the new flexible structure
       const { data, error } = await supabase
@@ -385,7 +326,7 @@ export const EmployeeForm = ({ onAddEmployee, employees, criteriaUpdateTrigger }
 
       toast({
         title: "Berhasil",
-        description: "Data evaluasi karyawan berhasil disimpan dengan struktur fleksibel dan terorganisir",
+        description: "Data evaluasi karyawan berhasil disimpan dengan struktur fleksibel",
       });
 
       fetchEvaluationScores();
@@ -470,7 +411,7 @@ export const EmployeeForm = ({ onAddEmployee, employees, criteriaUpdateTrigger }
   console.log('Total DB employees:', dbEmployees.length);
   console.log('Total evaluation scores:', evaluationScores.length);
 
-  // Group criteria by category for dynamic form rendering dengan urutan terstruktur
+  // Group criteria by category for dynamic form rendering
   const groupedCriteria = criteria.reduce((acc, criterion) => {
     if (!acc[criterion.category]) {
       acc[criterion.category] = [];
@@ -478,12 +419,6 @@ export const EmployeeForm = ({ onAddEmployee, employees, criteriaUpdateTrigger }
     acc[criterion.category].push(criterion);
     return acc;
   }, {} as { [key: string]: Criteria[] });
-
-  // Generate criteria codes (C1, C2, etc.) based on canonical order
-  const getCriteriaCode = (criteriaName: string): string => {
-    const index = CANONICAL_CRITERIA_ORDER.indexOf(criteriaName);
-    return index !== -1 ? `C${index + 1}` : 'C?';
-  };
 
   return (
     <div className="space-y-6">
@@ -494,7 +429,7 @@ export const EmployeeForm = ({ onAddEmployee, employees, criteriaUpdateTrigger }
             <User className="w-5 h-5" />
             Data Evaluasi Karyawan ({employees.length})
             <Badge variant="secondary" className="ml-2">
-              Struktur Terorganisir
+              Struktur Fleksibel
             </Badge>
           </CardTitle>
         </CardHeader>
@@ -568,56 +503,56 @@ export const EmployeeForm = ({ onAddEmployee, employees, criteriaUpdateTrigger }
               
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div className="space-y-3">
-                  <h4 className="font-semibold text-green-700">Kinerja Inti (C1-C6)</h4>
+                  <h4 className="font-semibold text-green-700">Kinerja Inti</h4>
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
-                      <span>C1 - Kualitas Kerja:</span>
+                      <span>Kualitas Kerja:</span>
                       <span className="font-medium">{selectedEmployeeForDetail.kualitasKerja}/5</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>C2 - Tanggung Jawab:</span>
+                      <span>Tanggung Jawab:</span>
                       <span className="font-medium">{selectedEmployeeForDetail.tanggungJawab}/5</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>C3 - Kuantitas Kerja:</span>
+                      <span>Kuantitas Kerja:</span>
                       <span className="font-medium">{selectedEmployeeForDetail.kuantitasKerja}/5</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>C4 - Pemahaman Tugas:</span>
+                      <span>Pemahaman Tugas:</span>
                       <span className="font-medium">{selectedEmployeeForDetail.pemahamanTugas}/5</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>C5 - Inisiatif:</span>
+                      <span>Inisiatif:</span>
                       <span className="font-medium">{selectedEmployeeForDetail.inisiatif}/5</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>C6 - Kerjasama:</span>
+                      <span>Kerjasama:</span>
                       <span className="font-medium">{selectedEmployeeForDetail.kerjasama}/5</span>
                     </div>
                   </div>
                 </div>
                 
                 <div className="space-y-3">
-                  <h4 className="font-semibold text-orange-600">Kedisiplinan (C7-C11)</h4>
+                  <h4 className="font-semibold text-orange-600">Kedisiplinan</h4>
                   <div className="space-y-2 text-sm">
                     <div className="flex justify-between">
-                      <span>C7 - Hari Alpa:</span>
+                      <span>Hari Alpa:</span>
                       <span className="font-medium">{selectedEmployeeForDetail.hariAlpa} hari</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>C8 - Keterlambatan:</span>
+                      <span>Keterlambatan:</span>
                       <span className="font-medium">{selectedEmployeeForDetail.keterlambatan} kali</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>C9 - Hari Izin:</span>
+                      <span>Hari Izin:</span>
                       <span className="font-medium">{selectedEmployeeForDetail.hariIzin} hari</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>C10 - Hari Sakit:</span>
+                      <span>Hari Sakit:</span>
                       <span className="font-medium">{selectedEmployeeForDetail.hariSakit} hari</span>
                     </div>
                     <div className="flex justify-between">
-                      <span>C11 - Pulang Cepat:</span>
+                      <span>Pulang Cepat:</span>
                       <span className="font-medium">{selectedEmployeeForDetail.pulangCepat} kali</span>
                     </div>
                   </div>
@@ -625,13 +560,13 @@ export const EmployeeForm = ({ onAddEmployee, employees, criteriaUpdateTrigger }
               </div>
               
               <div className="border-t pt-4">
-                <h4 className="font-semibold text-blue-600 mb-3">Faktor Tambahan (C12-C13)</h4>
+                <h4 className="font-semibold text-blue-600 mb-3">Faktor Tambahan</h4>
                 <div className="flex gap-4">
                   {selectedEmployeeForDetail.prestasi === 1 && (
-                    <Badge variant="default">C12 - Memiliki Prestasi</Badge>
+                    <Badge variant="default">Memiliki Prestasi</Badge>
                   )}
                   {selectedEmployeeForDetail.suratPeringatan === 1 && (
-                    <Badge variant="destructive">C13 - Surat Peringatan</Badge>
+                    <Badge variant="destructive">Surat Peringatan</Badge>
                   )}
                   {selectedEmployeeForDetail.prestasi === 0 && selectedEmployeeForDetail.suratPeringatan === 0 && (
                     <span className="text-gray-500">Tidak ada faktor tambahan</span>
@@ -645,7 +580,7 @@ export const EmployeeForm = ({ onAddEmployee, employees, criteriaUpdateTrigger }
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   {criteria.filter(c => !['Kualitas Kerja', 'Tanggung Jawab', 'Kuantitas Kerja', 'Pemahaman Tugas', 'Inisiatif', 'Kerjasama', 'Jumlah Hari Alpa', 'Jumlah Keterlambatan', 'Jumlah Hari Izin', 'Jumlah Hari Sakit', 'Pulang Cepat', 'Prestasi', 'Surat Peringatan'].includes(c.name)).map(criterion => (
                     <div key={criterion.id} className="flex justify-between">
-                      <span>{getCriteriaCode(criterion.name)} - {criterion.name}:</span>
+                      <span>{criterion.name}:</span>
                       <span className="font-medium">{(selectedEmployeeForDetail as any)[criterion.name] || 0}</span>
                     </div>
                   ))}
@@ -672,11 +607,11 @@ export const EmployeeForm = ({ onAddEmployee, employees, criteriaUpdateTrigger }
             Tambah Evaluasi Karyawan Baru
             {criteria.length > 0 && (
               <Badge variant="secondary" className="ml-2">
-                {criteria.length} Kriteria Terstruktur
+                {criteria.length} Kriteria Dimuat
               </Badge>
             )}
             <Badge variant="outline" className="ml-2 text-purple-600 border-purple-600">
-              Sistem Fleksibel & Terorganisir
+              Sistem Fleksibel
             </Badge>
           </CardTitle>
         </CardHeader>
@@ -717,19 +652,18 @@ export const EmployeeForm = ({ onAddEmployee, employees, criteriaUpdateTrigger }
 
             {selectedEmployeeId && criteria.length > 0 && (
               <>
-                {/* Dynamic form based on criteria from database dalam urutan terstruktur */}
+                {/* Dynamic form based on criteria from database */}
                 {Object.entries(groupedCriteria).map(([category, criteriaList]) => (
                   <div key={category} className="space-y-4">
                     <h3 className="text-lg font-semibold text-gray-800">{category}</h3>
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                       {criteriaList.map((criterion) => {
                         const currentValue = formData[criterion.id] || 0;
-                        const criteriaCode = getCriteriaCode(criterion.name);
                         
                         return (
                           <div key={criterion.id}>
                             <Label htmlFor={criterion.id}>
-                              {criteriaCode} - {criterion.name} ({criterion.scale})
+                              {criterion.name} ({criterion.scale})
                             </Label>
                             <Input
                               id={criterion.id}
@@ -740,7 +674,7 @@ export const EmployeeForm = ({ onAddEmployee, employees, criteriaUpdateTrigger }
                               onChange={(e) => handleInputChange(criterion.id, parseInt(e.target.value) || 0)}
                             />
                             <p className="text-xs text-gray-500 mt-1">
-                              Bobot: {criterion.weight}% | Tipe: {criterion.type} | Kode: {criteriaCode}
+                              Bobot: {criterion.weight}% | Tipe: {criterion.type} | ID: {criterion.id.slice(0, 8)}...
                             </p>
                           </div>
                         );

@@ -15,26 +15,6 @@ interface EditEmployeeDialogProps {
   onUpdate: (updatedEmployee: Employee) => void;
 }
 
-// Urutan kanonis kriteria untuk konsistensi C1-C13
-const CANONICAL_CRITERIA_ORDER = [
-  // C1-C6: Kinerja Inti (Benefit)
-  'Kualitas Kerja',
-  'Tanggung Jawab', 
-  'Kuantitas Kerja',
-  'Pemahaman Tugas',
-  'Inisiatif',
-  'Kerjasama',
-  // C7-C11: Kedisiplinan (Cost)
-  'Jumlah Hari Alpa',
-  'Jumlah Keterlambatan',
-  'Jumlah Hari Izin',
-  'Jumlah Hari Sakit',
-  'Pulang Cepat',
-  // C12-C13: Faktor Tambahan (Mixed)
-  'Prestasi',
-  'Surat Peringatan'
-];
-
 export const EditEmployeeDialog = ({ employee, isOpen, onClose, onUpdate }: EditEmployeeDialogProps) => {
   const [formData, setFormData] = useState<{ [key: string]: number }>({});
   const [criteria, setCriteria] = useState<Criteria[]>([]);
@@ -104,26 +84,14 @@ export const EditEmployeeDialog = ({ employee, isOpen, onClose, onUpdate }: Edit
     try {
       const { data: criteriaData, error } = await supabase
         .from('criteria')
-        .select('*');
+        .select('*')
+        .order('category', { ascending: true });
       
       if (error) {
         console.error('Error fetching criteria:', error);
       } else {
-        // Urutkan kriteria berdasarkan urutan kanonis
-        const sortedCriteria = (criteriaData || []).sort((a, b) => {
-          const indexA = CANONICAL_CRITERIA_ORDER.indexOf(a.name);
-          const indexB = CANONICAL_CRITERIA_ORDER.indexOf(b.name);
-          
-          // Jika kriteria tidak ditemukan dalam urutan kanonis, letakkan di akhir
-          if (indexA === -1 && indexB === -1) return a.name.localeCompare(b.name);
-          if (indexA === -1) return 1;
-          if (indexB === -1) return -1;
-          
-          return indexA - indexB;
-        });
-        
-        setCriteria(sortedCriteria || []);
-        console.log('EditEmployeeDialog: Criteria loaded in canonical order:', sortedCriteria?.length || 0);
+        setCriteria(criteriaData || []);
+        console.log('EditEmployeeDialog: Criteria loaded:', criteriaData?.length || 0);
       }
     } catch (error) {
       console.error('Error fetching criteria:', error);
@@ -166,50 +134,27 @@ export const EditEmployeeDialog = ({ employee, isOpen, onClose, onUpdate }: Edit
 
     setLoading(true);
     try {
-      // PERBAIKAN: Gunakan evaluation_scores table untuk update
-      // Ambil existing scores untuk employee ini
-      const { data: existingScores, error: fetchError } = await supabase
-        .from('evaluation_scores')
-        .select('id, criteria_id')
-        .eq('employee_id', employee.id);
+      // Prepare update data dengan mapping dinamis ke field database
+      const updateData: any = {
+        updated_at: new Date().toISOString()
+      };
 
-      if (fetchError) {
-        console.error('Error fetching existing scores:', fetchError);
-        throw fetchError;
-      }
-
-      // Buat map dari existing scores
-      const existingScoresMap = new Map<string, string>();
-      (existingScores || []).forEach(score => {
-        existingScoresMap.set(score.criteria_id, score.id);
-      });
-
-      // Prepare update data untuk evaluation_scores
-      const evaluationScoresData = criteria.map(criterion => {
+      // Map semua form data ke field database yang sesuai
+      criteria.forEach(criterion => {
         const formFieldName = createFieldName(criterion.name);
-        const existingId = existingScoresMap.get(criterion.id);
-        const scoreData: any = {
-          employee_id: employee.id,
-          criteria_id: criterion.id,
-          score: formData[formFieldName] || 0
-        };
-
-        // Sertakan ID jika skor sudah ada
-        if (existingId) {
-          scoreData.id = existingId;
-        }
-
-        return scoreData;
+        const dbFieldName = createDatabaseFieldMapping(criterion.name);
+        const value = formData[formFieldName] || 0;
+        
+        updateData[dbFieldName] = value;
+        console.log(`Update mapping: ${criterion.name} -> ${formFieldName} -> ${dbFieldName} = ${value}`);
       });
 
-      console.log('Updating evaluation scores:', evaluationScoresData);
+      console.log('Updating evaluation data:', updateData);
 
       const { error } = await supabase
-        .from('evaluation_scores')
-        .upsert(evaluationScoresData, { 
-          onConflict: 'employee_id,criteria_id',
-          ignoreDuplicates: false 
-        });
+        .from('employee_evaluations')
+        .update(updateData)
+        .eq('employee_id', employee.id);
 
       if (error) throw error;
 
@@ -217,19 +162,19 @@ export const EditEmployeeDialog = ({ employee, isOpen, onClose, onUpdate }: Edit
       const updatedEmployee: Employee = {
         ...employee,
         // Map data kembali ke format Employee interface
-        kualitasKerja: formData[createFieldName('Kualitas Kerja')] || employee.kualitasKerja,
-        tanggungJawab: formData[createFieldName('Tanggung Jawab')] || employee.tanggungJawab,
-        kuantitasKerja: formData[createFieldName('Kuantitas Kerja')] || employee.kuantitasKerja,
-        pemahamanTugas: formData[createFieldName('Pemahaman Tugas')] || employee.pemahamanTugas,
-        inisiatif: formData[createFieldName('Inisiatif')] || employee.inisiatif,
-        kerjasama: formData[createFieldName('Kerjasama')] || employee.kerjasama,
-        hariAlpa: formData[createFieldName('Jumlah Hari Alpa')] || employee.hariAlpa,
-        keterlambatan: formData[createFieldName('Jumlah Keterlambatan')] || employee.keterlambatan,
-        hariIzin: formData[createFieldName('Jumlah Hari Izin')] || employee.hariIzin,
-        hariSakit: formData[createFieldName('Jumlah Hari Sakit')] || employee.hariSakit,
-        pulangCepat: formData[createFieldName('Pulang Cepat')] || employee.pulangCepat,
-        prestasi: formData[createFieldName('Prestasi')] || employee.prestasi,
-        suratPeringatan: formData[createFieldName('Surat Peringatan')] || employee.suratPeringatan
+        kualitasKerja: updateData.kualitas_kerja || employee.kualitasKerja,
+        tanggungJawab: updateData.tanggung_jawab || employee.tanggungJawab,
+        kuantitasKerja: updateData.kuantitas_kerja || employee.kuantitasKerja,
+        pemahamanTugas: updateData.pemahaman_tugas || employee.pemahamanTugas,
+        inisiatif: updateData.inisiatif || employee.inisiatif,
+        kerjasama: updateData.kerjasama || employee.kerjasama,
+        hariAlpa: updateData.hari_alpa || employee.hariAlpa,
+        keterlambatan: updateData.keterlambatan || employee.keterlambatan,
+        hariIzin: updateData.hari_izin || employee.hariIzin,
+        hariSakit: updateData.hari_sakit || employee.hariSakit,
+        pulangCepat: updateData.pulang_cepat || employee.pulangCepat,
+        prestasi: updateData.prestasi || employee.prestasi,
+        suratPeringatan: updateData.surat_peringatan || employee.suratPeringatan
       };
 
       onUpdate(updatedEmployee);
@@ -237,7 +182,7 @@ export const EditEmployeeDialog = ({ employee, isOpen, onClose, onUpdate }: Edit
 
       toast({
         title: "Berhasil",
-        description: "Data evaluasi karyawan berhasil diperbarui dengan struktur terorganisir",
+        description: "Data evaluasi karyawan berhasil diperbarui",
       });
     } catch (error) {
       console.error('Error updating evaluation:', error);
@@ -253,7 +198,7 @@ export const EditEmployeeDialog = ({ employee, isOpen, onClose, onUpdate }: Edit
 
   if (!employee) return null;
 
-  // Group criteria by category for dynamic form rendering dengan urutan terstruktur
+  // Group criteria by category for dynamic form rendering
   const groupedCriteria = criteria.reduce((acc, criterion) => {
     if (!acc[criterion.category]) {
       acc[criterion.category] = [];
@@ -261,12 +206,6 @@ export const EditEmployeeDialog = ({ employee, isOpen, onClose, onUpdate }: Edit
     acc[criterion.category].push(criterion);
     return acc;
   }, {} as { [key: string]: Criteria[] });
-
-  // Generate criteria codes (C1, C2, etc.) based on canonical order
-  const getCriteriaCode = (criteriaName: string): string => {
-    const index = CANONICAL_CRITERIA_ORDER.indexOf(criteriaName);
-    return index !== -1 ? `C${index + 1}` : 'C?';
-  };
 
   return (
     <Dialog open={isOpen} onOpenChange={onClose}>
@@ -276,7 +215,7 @@ export const EditEmployeeDialog = ({ employee, isOpen, onClose, onUpdate }: Edit
         </DialogHeader>
         
         <form onSubmit={handleSubmit} className="space-y-6">
-          {/* Dynamic form based on criteria from database dalam urutan terstruktur */}
+          {/* Dynamic form based on criteria from database */}
           {Object.entries(groupedCriteria).map(([category, criteriaList]) => (
             <div key={category} className="space-y-4">
               <h3 className="text-lg font-semibold text-gray-800">{category}</h3>
@@ -284,12 +223,11 @@ export const EditEmployeeDialog = ({ employee, isOpen, onClose, onUpdate }: Edit
                 {criteriaList.map((criterion) => {
                   const fieldName = createFieldName(criterion.name);
                   const currentValue = formData[fieldName] || 0;
-                  const criteriaCode = getCriteriaCode(criterion.name);
                   
                   return (
                     <div key={criterion.id}>
                       <Label htmlFor={fieldName}>
-                        {criteriaCode} - {criterion.name} ({criterion.scale})
+                        {criterion.name} ({criterion.scale})
                       </Label>
                       <Input
                         id={fieldName}
@@ -300,7 +238,7 @@ export const EditEmployeeDialog = ({ employee, isOpen, onClose, onUpdate }: Edit
                         onChange={(e) => handleInputChange(fieldName, parseInt(e.target.value) || 0)}
                       />
                       <p className="text-xs text-gray-500 mt-1">
-                        Bobot: {criterion.weight}% | Tipe: {criterion.type} | Kode: {criteriaCode}
+                        Bobot: {criterion.weight}% | Tipe: {criterion.type} | Field: {fieldName}
                       </p>
                     </div>
                   );
