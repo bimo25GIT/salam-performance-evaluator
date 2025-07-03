@@ -1,4 +1,3 @@
-
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -12,6 +11,26 @@ interface CriteriaTableProps {
   key?: number;
 }
 
+// Urutan kanonis kriteria untuk konsistensi C1-C13
+const CANONICAL_CRITERIA_ORDER = [
+  // C1-C6: Kinerja Inti (Benefit)
+  'Kualitas Kerja',
+  'Tanggung Jawab', 
+  'Kuantitas Kerja',
+  'Pemahaman Tugas',
+  'Inisiatif',
+  'Kerjasama',
+  // C7-C11: Kedisiplinan (Cost)
+  'Jumlah Hari Alpa',
+  'Jumlah Keterlambatan',
+  'Jumlah Hari Izin',
+  'Jumlah Hari Sakit',
+  'Pulang Cepat',
+  // C12-C13: Faktor Tambahan (Mixed)
+  'Prestasi',
+  'Surat Peringatan'
+];
+
 export const CriteriaTable = ({ key }: CriteriaTableProps) => {
   const [criteria, setCriteria] = useState<Criteria[]>([]);
   const [loading, setLoading] = useState(false);
@@ -22,8 +41,7 @@ export const CriteriaTable = ({ key }: CriteriaTableProps) => {
     try {
       const { data, error } = await supabase
         .from('criteria')
-        .select('*')
-        .order('category', { ascending: true });
+        .select('*');
       
       if (error) {
         console.error('Error fetching criteria:', error);
@@ -33,8 +51,21 @@ export const CriteriaTable = ({ key }: CriteriaTableProps) => {
           variant: "destructive",
         });
       } else {
-        setCriteria((data || []) as Criteria[]);
-        console.log('CriteriaTable: Loaded criteria:', (data || []).length);
+        // Urutkan kriteria berdasarkan urutan kanonis
+        const sortedCriteria = (data || []).sort((a, b) => {
+          const indexA = CANONICAL_CRITERIA_ORDER.indexOf(a.name);
+          const indexB = CANONICAL_CRITERIA_ORDER.indexOf(b.name);
+          
+          // Jika kriteria tidak ditemukan dalam urutan kanonis, letakkan di akhir
+          if (indexA === -1 && indexB === -1) return a.name.localeCompare(b.name);
+          if (indexA === -1) return 1;
+          if (indexB === -1) return -1;
+          
+          return indexA - indexB;
+        });
+        
+        setCriteria(sortedCriteria as Criteria[]);
+        console.log('CriteriaTable: Loaded criteria in canonical order:', sortedCriteria.length);
       }
     } catch (error) {
       console.error('Network error:', error);
@@ -69,6 +100,12 @@ export const CriteriaTable = ({ key }: CriteriaTableProps) => {
       totals[criterion.type] = (totals[criterion.type] || 0) + criterion.weight;
     });
     return totals;
+  };
+
+  // Generate criteria codes (C1, C2, etc.) based on canonical order
+  const getCriteriaCode = (criteriaName: string): string => {
+    const index = CANONICAL_CRITERIA_ORDER.indexOf(criteriaName);
+    return index !== -1 ? `C${index + 1}` : 'C?';
   };
 
   return (
@@ -123,6 +160,7 @@ export const CriteriaTable = ({ key }: CriteriaTableProps) => {
                     <table className="w-full border-collapse border border-gray-300">
                       <thead>
                         <tr className="bg-gray-100">
+                          <th className="border border-gray-300 px-4 py-2 text-left">Kode</th>
                           <th className="border border-gray-300 px-4 py-2 text-left">Kriteria</th>
                           <th className="border border-gray-300 px-4 py-2 text-center">Tipe</th>
                           <th className="border border-gray-300 px-4 py-2 text-center">Bobot (%)</th>
@@ -132,6 +170,9 @@ export const CriteriaTable = ({ key }: CriteriaTableProps) => {
                       <tbody>
                         {criteriaList.map((criterion) => (
                           <tr key={criterion.id} className="hover:bg-gray-50">
+                            <td className="border border-gray-300 px-4 py-2 font-mono font-bold text-blue-600">
+                              {getCriteriaCode(criterion.name)}
+                            </td>
                             <td className="border border-gray-300 px-4 py-2">{criterion.name}</td>
                             <td className="border border-gray-300 px-4 py-2 text-center">
                               <Badge variant={criterion.type === 'Benefit' ? 'default' : 'destructive'}>
