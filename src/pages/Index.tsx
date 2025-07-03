@@ -373,7 +373,7 @@ const Index = () => {
                   <p className="text-2xl font-bold text-gray-900">
                     {results.filter(r => r.convertedScore < 3).length}
                   </p>
-                  <p className="text-xs text-gray-500">Skor < 3</p>
+                  <p className="text-xs text-gray-500">Skor &lt; 3</p>
                 </div>
               </div>
             </CardContent>
