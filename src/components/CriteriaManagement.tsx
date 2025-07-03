@@ -380,7 +380,7 @@ export const CriteriaManagement = ({ onCriteriaChange }: CriteriaManagementProps
                       <SelectContent>
                         <SelectItem value="A. Kinerja Inti">Kinerja Inti (Max: 60%)</SelectItem>
                         <SelectItem value="B. Kedisiplinan">Kedisiplinan (Max: 25%)</SelectItem>
-                        <SelectItem value="C. Prestasi">Prestasi (Max: 15%)</SelectItem>
+                        <SelectItem value="C. Faktor Tambahan">Faktor Tambahan (Max: 15%)</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
