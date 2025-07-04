@@ -18,6 +18,7 @@ interface EditEmployeeDialogProps {
 export const EditEmployeeDialog = ({ employee, isOpen, onClose, onUpdate }: EditEmployeeDialogProps) => {
   const [formData, setFormData] = useState<{ [key: string]: number }>({});
   const [criteria, setCriteria] = useState<Criteria[]>([]);
+  const [currentScores, setCurrentScores] = useState<{ [criteria_id: string]: number }>({});
   const [loading, setLoading] = useState(false);
   const { toast } = useToast();
 
@@ -52,50 +53,87 @@ export const EditEmployeeDialog = ({ employee, isOpen, onClose, onUpdate }: Edit
       'surat_peringatan': 'suratPeringatan'
     };
 
-    return specialMappings[fieldName] || fieldName;
+    return specialMappings[fieldName] || criteriaName; // Return original name for dynamic criteria
   };
 
-  // Fetch criteria from database
-  const fetchCriteria = async () => {
+  // Fetch criteria and current scores from database
+  const fetchCriteriaAndScores = async () => {
+    if (!employee) return;
+
     try {
-      const { data: criteriaData, error } = await supabase
+      // Fetch criteria
+      const { data: criteriaData, error: criteriaError } = await supabase
         .from('criteria')
         .select('*')
         .order('category', { ascending: true });
       
-      if (error) {
-        console.error('Error fetching criteria:', error);
-      } else {
-        setCriteria(criteriaData || []);
-        console.log('EditEmployeeDialog: Criteria loaded:', criteriaData?.length || 0);
+      if (criteriaError) {
+        console.error('Error fetching criteria:', criteriaError);
+        return;
       }
+
+      setCriteria(criteriaData || []);
+
+      // Fetch current evaluation scores for this employee
+      const { data: scoresData, error: scoresError } = await supabase
+        .from('evaluation_scores')
+        .select('criteria_id, score')
+        .eq('employee_id', employee.id);
+
+      if (scoresError) {
+        console.error('Error fetching evaluation scores:', scoresError);
+        return;
+      }
+
+      // Create a map of criteria_id to score
+      const scoresMap: { [criteria_id: string]: number } = {};
+      (scoresData || []).forEach(score => {
+        scoresMap[score.criteria_id] = score.score;
+      });
+
+      setCurrentScores(scoresMap);
+      console.log('EditEmployeeDialog: Current scores loaded:', scoresMap);
+      console.log('EditEmployeeDialog: Criteria loaded:', criteriaData?.length || 0);
+      
     } catch (error) {
-      console.error('Error fetching criteria:', error);
+      console.error('Error fetching criteria and scores:', error);
     }
   };
 
   useEffect(() => {
-    if (isOpen) {
-      fetchCriteria();
+    if (isOpen && employee) {
+      fetchCriteriaAndScores();
     }
-  }, [isOpen]);
+  }, [isOpen, employee]);
 
   useEffect(() => {
     if (employee && criteria.length > 0) {
-      // Initialize form data dengan nilai dari employee
+      // Initialize form data dengan nilai dari database atau employee object
       const newFormData: { [key: string]: number } = {};
       
       criteria.forEach(criterion => {
         const formFieldName = createFieldName(criterion.name);
-        const employeeFieldName = createEmployeeFieldMapping(criterion.name);
-        const value = (employee as any)[employeeFieldName] || 0;
+        
+        // Priority: 1. Current scores from database, 2. Employee object, 3. Default value
+        let value = 0;
+        
+        if (currentScores[criterion.id] !== undefined) {
+          // Use value from database
+          value = currentScores[criterion.id];
+        } else {
+          // Fallback to employee object
+          const employeeFieldName = createEmployeeFieldMapping(criterion.name);
+          value = (employee as any)[employeeFieldName] || 0;
+        }
+        
         newFormData[formFieldName] = value;
+        console.log(`Criterion ${criterion.name}: formField=${formFieldName}, value=${value}, criteriaId=${criterion.id}`);
       });
       
       setFormData(newFormData);
       console.log('EditEmployeeDialog: Form data initialized:', newFormData);
     }
-  }, [employee, criteria]);
+  }, [employee, criteria, currentScores]);
 
   const handleInputChange = (field: string, value: number) => {
     setFormData(prev => ({
@@ -135,22 +173,18 @@ export const EditEmployeeDialog = ({ employee, isOpen, onClose, onUpdate }: Edit
 
       // Update the employee object with new values for UI consistency
       const updatedEmployee: Employee = {
-        ...employee,
-        // Map data back to Employee interface format
-        kualitasKerja: formData[createFieldName('Kualitas Kerja')] || employee.kualitasKerja,
-        tanggungJawab: formData[createFieldName('Tanggung Jawab')] || employee.tanggungJawab,
-        kuantitasKerja: formData[createFieldName('Kuantitas Kerja')] || employee.kuantitasKerja,
-        pemahamanTugas: formData[createFieldName('Pemahaman Tugas')] || employee.pemahamanTugas,
-        inisiatif: formData[createFieldName('Inisiatif')] || employee.inisiatif,
-        kerjasama: formData[createFieldName('Kerjasama')] || employee.kerjasama,
-        hariAlpa: formData[createFieldName('Jumlah Hari Alpa')] || employee.hariAlpa,
-        keterlambatan: formData[createFieldName('Jumlah Keterlambatan')] || employee.keterlambatan,
-        hariIzin: formData[createFieldName('Jumlah Hari Izin')] || employee.hariIzin,
-        hariSakit: formData[createFieldName('Jumlah Hari Sakit')] || employee.hariSakit,
-        pulangCepat: formData[createFieldName('Pulang Cepat')] || employee.pulangCepat,
-        prestasi: formData[createFieldName('Prestasi')] || employee.prestasi,
-        suratPeringatan: formData[createFieldName('Surat Peringatan')] || employee.suratPeringatan
+        ...employee
       };
+
+      // Map all criteria values back to employee object
+      criteria.forEach(criterion => {
+        const formFieldName = createFieldName(criterion.name);
+        const employeeFieldName = createEmployeeFieldMapping(criterion.name);
+        const value = formData[formFieldName] || 0;
+        
+        // Update employee object with new value
+        (updatedEmployee as any)[employeeFieldName] = value;
+      });
 
       onUpdate(updatedEmployee);
       onClose();
@@ -198,6 +232,7 @@ export const EditEmployeeDialog = ({ employee, isOpen, onClose, onUpdate }: Edit
                 {criteriaList.map((criterion) => {
                   const fieldName = createFieldName(criterion.name);
                   const currentValue = formData[fieldName] || 0;
+                  const dbScore = currentScores[criterion.id];
                   
                   return (
                     <div key={criterion.id}>
@@ -213,7 +248,8 @@ export const EditEmployeeDialog = ({ employee, isOpen, onClose, onUpdate }: Edit
                         onChange={(e) => handleInputChange(fieldName, parseInt(e.target.value) || 0)}
                       />
                       <p className="text-xs text-gray-500 mt-1">
-                        Bobot: {criterion.weight}% | Tipe: {criterion.type} | Field: {fieldName}
+                        Bobot: {criterion.weight}% | Tipe: {criterion.type} | 
+                        {dbScore !== undefined && ` DB: ${dbScore} |`} Field: {fieldName}
                       </p>
                     </div>
                   );
