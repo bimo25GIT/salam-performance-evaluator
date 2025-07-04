@@ -898,7 +898,7 @@ export const SAWCalculator = ({ employees, onCalculate, criteriaUpdateTrigger }:
                 <div className="mt-2">
                   <strong>Cost Criteria:</strong>
                   <p>• Binary 0/1: Rij = 1.000 jika nilai = 0, Rij = 0.000 jika nilai = 1</p>
-                  <p>• Lainnya: Rij = 0.000 jika nilai > 0, Rij = 1.000 jika nilai = 0</p>
+                  <p>• Lainnya: Rij = 0.000 jika nilai {'>'} 0, Rij = 1.000 jika nilai = 0</p>
                 </div>
                 <div className="mt-2 text-green-700">
                   <strong>Struktur Kriteria Otomatis:</strong>
