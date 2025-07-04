@@ -31,30 +31,6 @@ export const EditEmployeeDialog = ({ employee, isOpen, onClose, onUpdate }: Edit
       .replace(/_+/g, '_'); // Ganti multiple underscore dengan single
   };
 
-  // Mapping dinamis dari nama kriteria ke field database
-  const createDatabaseFieldMapping = (criteriaName: string): string => {
-    const fieldName = createFieldName(criteriaName);
-    
-    // Mapping khusus untuk kriteria yang sudah ada di database
-    const specialMappings: { [key: string]: string } = {
-      'kualitas_kerja': 'kualitas_kerja',
-      'tanggung_jawab': 'tanggung_jawab',
-      'kuantitas_kerja': 'kuantitas_kerja',
-      'pemahaman_tugas': 'pemahaman_tugas',
-      'inisiatif': 'inisiatif',
-      'kerjasama': 'kerjasama',
-      'jumlah_hari_alpa': 'hari_alpa',
-      'jumlah_keterlambatan': 'keterlambatan',
-      'jumlah_hari_izin': 'hari_izin',
-      'jumlah_hari_sakit': 'hari_sakit',
-      'pulang_cepat': 'pulang_cepat',
-      'prestasi': 'prestasi',
-      'surat_peringatan': 'surat_peringatan'
-    };
-
-    return specialMappings[fieldName] || fieldName;
-  };
-
   // Mapping dinamis dari nama kriteria ke field Employee interface
   const createEmployeeFieldMapping = (criteriaName: string): string => {
     const fieldName = createFieldName(criteriaName);
@@ -134,47 +110,46 @@ export const EditEmployeeDialog = ({ employee, isOpen, onClose, onUpdate }: Edit
 
     setLoading(true);
     try {
-      // Prepare update data dengan mapping dinamis ke field database
-      const updateData: any = {
-        updated_at: new Date().toISOString()
-      };
-
-      // Map semua form data ke field database yang sesuai
-      criteria.forEach(criterion => {
+      // Prepare data for upsert to evaluation_scores table
+      const evaluationScores = criteria.map(criterion => {
         const formFieldName = createFieldName(criterion.name);
-        const dbFieldName = createDatabaseFieldMapping(criterion.name);
-        const value = formData[formFieldName] || 0;
+        const score = formData[formFieldName] || 0;
         
-        updateData[dbFieldName] = value;
-        console.log(`Update mapping: ${criterion.name} -> ${formFieldName} -> ${dbFieldName} = ${value}`);
+        return {
+          employee_id: employee.id,
+          criteria_id: criterion.id,
+          score: score
+        };
       });
 
-      console.log('Updating evaluation data:', updateData);
+      console.log('Upserting evaluation scores:', evaluationScores);
 
+      // Upsert evaluation scores
       const { error } = await supabase
-        .from('employee_evaluations')
-        .update(updateData)
-        .eq('employee_id', employee.id);
+        .from('evaluation_scores')
+        .upsert(evaluationScores, { 
+          onConflict: 'employee_id,criteria_id' 
+        });
 
       if (error) throw error;
 
-      // Convert back to Employee format
+      // Update the employee object with new values for UI consistency
       const updatedEmployee: Employee = {
         ...employee,
-        // Map data kembali ke format Employee interface
-        kualitasKerja: updateData.kualitas_kerja || employee.kualitasKerja,
-        tanggungJawab: updateData.tanggung_jawab || employee.tanggungJawab,
-        kuantitasKerja: updateData.kuantitas_kerja || employee.kuantitasKerja,
-        pemahamanTugas: updateData.pemahaman_tugas || employee.pemahamanTugas,
-        inisiatif: updateData.inisiatif || employee.inisiatif,
-        kerjasama: updateData.kerjasama || employee.kerjasama,
-        hariAlpa: updateData.hari_alpa || employee.hariAlpa,
-        keterlambatan: updateData.keterlambatan || employee.keterlambatan,
-        hariIzin: updateData.hari_izin || employee.hariIzin,
-        hariSakit: updateData.hari_sakit || employee.hariSakit,
-        pulangCepat: updateData.pulang_cepat || employee.pulangCepat,
-        prestasi: updateData.prestasi || employee.prestasi,
-        suratPeringatan: updateData.surat_peringatan || employee.suratPeringatan
+        // Map data back to Employee interface format
+        kualitasKerja: formData[createFieldName('Kualitas Kerja')] || employee.kualitasKerja,
+        tanggungJawab: formData[createFieldName('Tanggung Jawab')] || employee.tanggungJawab,
+        kuantitasKerja: formData[createFieldName('Kuantitas Kerja')] || employee.kuantitasKerja,
+        pemahamanTugas: formData[createFieldName('Pemahaman Tugas')] || employee.pemahamanTugas,
+        inisiatif: formData[createFieldName('Inisiatif')] || employee.inisiatif,
+        kerjasama: formData[createFieldName('Kerjasama')] || employee.kerjasama,
+        hariAlpa: formData[createFieldName('Jumlah Hari Alpa')] || employee.hariAlpa,
+        keterlambatan: formData[createFieldName('Jumlah Keterlambatan')] || employee.keterlambatan,
+        hariIzin: formData[createFieldName('Jumlah Hari Izin')] || employee.hariIzin,
+        hariSakit: formData[createFieldName('Jumlah Hari Sakit')] || employee.hariSakit,
+        pulangCepat: formData[createFieldName('Pulang Cepat')] || employee.pulangCepat,
+        prestasi: formData[createFieldName('Prestasi')] || employee.prestasi,
+        suratPeringatan: formData[createFieldName('Surat Peringatan')] || employee.suratPeringatan
       };
 
       onUpdate(updatedEmployee);
