@@ -141,7 +141,7 @@ export const SAWCalculator = ({ employees, onCalculate, criteriaUpdateTrigger }:
       'surat_peringatan': 'suratPeringatan'
     };
 
-    return specialMappings[fieldName] || fieldName;
+    return specialMappings[fieldName] || criteriaName; // Use original name for dynamic criteria
   };
 
   // Mapping untuk kode kriteria C1-C13+ dengan urutan yang benar
@@ -535,11 +535,20 @@ export const SAWCalculator = ({ employees, onCalculate, criteriaUpdateTrigger }:
         return;
       }
 
-      // Step 1: Create decision matrix - use RAW DATA
+      // Step 1: Create decision matrix - use RAW DATA from evaluation_scores
       const matrix = employees.map(emp => 
         activeCriteria.map(criterion => {
           const employeeFieldName = createEmployeeFieldMapping(criterion.name);
-          const rawValue = (emp as any)[employeeFieldName] || 0;
+          let rawValue = 0;
+          
+          // Try to get value from employee object (for backward compatibility)
+          if (typeof (emp as any)[employeeFieldName] !== 'undefined') {
+            rawValue = (emp as any)[employeeFieldName] || 0;
+          } else {
+            // For new dynamic criteria, use the criterion name directly
+            rawValue = (emp as any)[criterion.name] || 0;
+          }
+          
           console.log(`Employee ${emp.name}, criterion ${criterion.name}: field=${employeeFieldName}, value=${rawValue}`);
           return rawValue;
         })
