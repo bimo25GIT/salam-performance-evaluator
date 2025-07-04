@@ -17,9 +17,10 @@ interface EmployeeFormProps {
   onAddEmployee: (employee: Employee) => void;
   employees: Employee[];
   criteriaUpdateTrigger?: number;
+  onEmployeeUpdate?: () => void;
 }
 
-export const EmployeeForm = ({ onAddEmployee, employees, criteriaUpdateTrigger }: EmployeeFormProps) => {
+export const EmployeeForm = ({ onAddEmployee, employees, criteriaUpdateTrigger, onEmployeeUpdate }: EmployeeFormProps) => {
   const [dbEmployees, setDbEmployees] = useState<DBEmployee[]>([]);
   const [evaluationScores, setEvaluationScores] = useState<EvaluationScore[]>([]);
   const [criteria, setCriteria] = useState<Criteria[]>([]);
@@ -366,6 +367,11 @@ export const EmployeeForm = ({ onAddEmployee, employees, criteriaUpdateTrigger }
     // Also update parent component
     onAddEmployee(updatedEmployee);
     
+    // Notify parent about the update
+    if (onEmployeeUpdate) {
+      onEmployeeUpdate();
+    }
+    
     toast({
       title: "Berhasil",
       description: "Data evaluasi karyawan berhasil diperbarui",
@@ -391,6 +397,11 @@ export const EmployeeForm = ({ onAddEmployee, employees, criteriaUpdateTrigger }
 
       // Refresh data
       await fetchEvaluationScores();
+      
+      // Notify parent about the update
+      if (onEmployeeUpdate) {
+        onEmployeeUpdate();
+      }
     } catch (error) {
       console.error('Error deleting evaluation:', error);
       toast({
