@@ -378,9 +378,9 @@ export const SAWCalculator = ({ employees, onCalculate, criteriaUpdateTrigger }:
       console.log('Clearing saved SAW results...');
 
       // Delete in order: normalized matrix, results, calculations
-      await supabase.from('saw_normalized_matrix').delete().neq('id', '');
-      await supabase.from('saw_results').delete().neq('id', '');
-      await supabase.from('saw_calculations').delete().neq('id', '');
+      await supabase.from('saw_normalized_matrix').delete().not('id', 'is', null);
+      await supabase.from('saw_results').delete().not('id', 'is', null);
+      await supabase.from('saw_calculations').delete().not('id', 'is', null);
 
       setHasSavedResults(false);
       setLastCalculationDate('');
